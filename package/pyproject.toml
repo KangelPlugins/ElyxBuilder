@@ -13,12 +13,14 @@ dependencies = ["pyyaml>=6.0"]
 elyb = "elyb.cli:main"
 
 [tool.setuptools]
-packages = ["elyb", "elyb.cmds", "elyb.cmds.components"]
+packages = ["elyb", "elyb.cmds", "elyb.cmds.components", "elyb.elyxdsl", "elyb.elyxdsl.parser"]
 
 [tool.setuptools.package-dir]
 elyb = "src"
 "elyb.cmds" = "src/cmds"
 "elyb.cmds.components" = "src/cmds/components"
+"elyb.elyxdsl" = "src/elyxdsl"
+"elyb.elyxdsl.parser" = "src/elyxdsl/parser"
 
 [tool.setuptools.package-data]
 elyb = ["config.json"]

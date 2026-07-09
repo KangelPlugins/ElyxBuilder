@@ -9,6 +9,7 @@ from elyb.cmds.cached import runCached
 from elyb.cmds.ignore import runAddIgnore, runDelIgnore
 from elyb.cmds.stats import runStatBuilds, runStatLines, runStatSize, runStatFiles
 from elyb.cmds.watch import runWatch
+from elyb.cmds.script import runScript
 
 def buildParser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="elyb")
@@ -48,6 +49,9 @@ def buildParser() -> argparse.ArgumentParser:
     filesParser = statsSubparsers.add_parser("files", help="count files by extension")
     filesParser.add_argument("-a", "--all", action="store_true", dest="allMode", help="include refmap.yml and additional directories")
     filesParser.add_argument("-add", "--additional", nargs="+", dest="additionalDirs", metavar="DIR", default=[], help="additional directories to include (relative to cwd, only with --all)")
+    scriptParser = subparsers.add_parser("script", help="run .edsl script")
+    scriptParser.add_argument("name", help="script name (without .edsl)")
+    scriptParser.add_argument("args", nargs="*", help="arguments passed to script")
     addIgnoreParser = subparsers.add_parser("add-ignore", help="add path to an ignore list in config.yml")
     addIgnoreParser.add_argument("path", help="path to add (Unix-style)")
     addIgnoreGroup = addIgnoreParser.add_mutually_exclusive_group(required=True)
@@ -173,6 +177,9 @@ def main():
                     )
         else:
             parser.parse_args(["stats", "--help"])
+        return
+    if args.command == "script":
+        runScript(args.name, args.args)
         return
     if args.command == "add-ignore":
         runAddIgnore(args.path, args.target)
