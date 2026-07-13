@@ -4,11 +4,10 @@ import random
 import re
 import sys
 import shutil
-import termios
-import tty
 import time
 import threading
-import select
+
+from elyb.cmds.components.rawterm import RawTerminal, readKey
 
 CYAN  = "\033[96m"
 GREEN = "\033[92m"
@@ -53,23 +52,6 @@ def loadConfig() -> dict:
 def termSize() -> tuple[int, int]:
     s = shutil.get_terminal_size()
     return s.columns, s.lines
-
-
-def readKey(fd: int) -> str:
-    ch = os.read(fd, 1)
-    if ch != b"\x1b":
-        return ch.decode("utf-8", errors="ignore")
-    ready, _, _ = select.select([fd], [], [], 0.05)
-    if not ready:
-        return "\x1b"
-    ch2 = os.read(fd, 1)
-    if ch2 != b"[":
-        return "\x1b"
-    ready2, _, _ = select.select([fd], [], [], 0.05)
-    if not ready2:
-        return "\x1b["
-    ch3 = os.read(fd, 1)
-    return "\x1b[" + ch3.decode("utf-8", errors="ignore")
 
 
 class Field:
@@ -416,21 +398,10 @@ def animateFormatScreen(fields: list[Field], renderer: "Renderer", fd: int) -> l
 
         elif key == "\r":
             if active < N - 1:
-                _, _, choices, _ = FORMAT_ITEMS[active]
-                cur = "  ".join(choices)
-                row = fieldRow(active)
-                for n in range(len(cur), -1, -1):
-                    writeRow(row, formatLine(active, cur[:n]))
-                    time.sleep(0.012)
                 prev   = active
                 active += 1
-                target = "  ".join(FORMAT_ITEMS[active][2])
-                row    = fieldRow(active)
-                for n in range(1, len(target) + 1):
-                    writeRow(row, formatLine(active, target[:n]))
-                    time.sleep(0.018)
-                writeRow(row,             formatLine(active))
                 writeRow(fieldRow(prev),  formatLine(prev))
+                writeRow(fieldRow(active), formatLine(active))
             else:
                 break
         elif key == "\x1b[C":
@@ -501,14 +472,14 @@ def runInteractive():
     cfg    = loadConfig()
     fields = buildFields(cfg)
     fd     = sys.stdin.fileno()
-    oldSettings = termios.tcgetattr(fd)
+    rawTerminal = RawTerminal(fd)
     sys.stdout.write(HIDE_CURSOR)
     sys.stdout.flush()
     renderer  = Renderer(fields)
     renderer.start()
     cancelled = False
     try:
-        tty.setraw(fd)
+        rawTerminal.__enter__()
         while True:
             key = readKey(fd)
             if key in ("\x03", "\x1b"):
@@ -573,7 +544,7 @@ def runInteractive():
         missingLabel = validateFields(fields)
         if missingLabel:
             renderer.stop()
-            termios.tcsetattr(fd, termios.TCSADRAIN, oldSettings)
+            rawTerminal.__exit__(None, None, None)
             sys.stdout.write(SHOW_CURSOR + "\033[2J\033[H")
             sys.stdout.flush()
             print(f"error: field \"{missingLabel}\" is required")
@@ -584,7 +555,7 @@ def runInteractive():
 
     if cancelled:
         renderer.stop()
-    termios.tcsetattr(fd, termios.TCSADRAIN, oldSettings)
+    rawTerminal.__exit__(None, None, None)
     sys.stdout.write(SHOW_CURSOR)
     sys.stdout.flush()
 

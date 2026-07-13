@@ -2,11 +2,11 @@ import io
 import os
 import shutil
 import sys
-import termios
 import threading
 import time
-import tty
 from contextlib import redirect_stdout, redirect_stderr
+
+from elyb.cmds.components.rawterm import RawTerminal, readByte
 
 GREEN = "\033[32m"
 RED   = "\033[31m"
@@ -104,7 +104,7 @@ class WatchUI:
 
         for i in range(len(visible), logAreaRows):
             row = 3 + i
-            buf.append(f"\033[{row};1H\033[2K")
+            buf.append(f"\033[{row};1H\033[2K{RESET}")
 
         buf.append(f"\033[{rows - 1};1H\033[2K{sep}")
         buf.append(f"\033[{rows};1H\033[2K{footer}")
@@ -268,25 +268,22 @@ def runWatch(intervalSeconds: int, buildArgs: list[str]) -> None:
     pollThread.start()
 
     fd = sys.stdin.fileno()
-    oldSettings = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
-        while True:
-            ch = os.read(fd, 1)
-            key = ch.decode("utf-8", errors="ignore").lower()
-            if key == "q" or ch == b"\x03":
-                break
-            if key == "p":
-                paused = ui.isPaused()
-                ui.setPaused(not paused)
-                if paused:
-                    ui.addLog("• Resumed")
-                else:
-                    ui.addLog("• Paused")
+        with RawTerminal(fd):
+            while True:
+                ch = readByte(fd)
+                key = ch.decode("utf-8", errors="ignore").lower()
+                if key == "q" or ch == b"\x03":
+                    break
+                if key == "p":
+                    paused = ui.isPaused()
+                    ui.setPaused(not paused)
+                    if paused:
+                        ui.addLog("• Resumed")
+                    else:
+                        ui.addLog("• Paused")
     except Exception:
         pass
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, oldSettings)
 
     ui.addLog("• Bye-bye")
     time.sleep(0.3)
