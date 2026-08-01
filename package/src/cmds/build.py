@@ -174,21 +174,22 @@ def buildMetaInfo(metaPath: str, compiled: bool, buildNum: int, compilePythonVer
                 with open(absPath, "rb") as f:
                     hasher.update(f.read())
     sourceHash = hasher.hexdigest()
-    lines = [
-        "",
-        "# elyxbuilder info",
-        f"compiled: {'true' if compiled else 'false'}",
-        f"buildNum: {buildNum}",
-        f"buildDate: {buildDate}",
-        f"pythonVer: {compilePythonVer}",
-        f"sourceHash: {sourceHash} # Sha256",
-        f"elybVer: {version}",
-    ]
+    meta = json.loads(original) if metaPath.endswith(".json") else yaml.safe_load(original)
+    meta["elyxbuilder"] = {
+        "compiled": compiled,
+        "buildNum": buildNum,
+        "buildDate": buildDate,
+        "pythonVer": compilePythonVer,
+        "sourceHash": sourceHash,
+        "elybVer": version,
+    }
+
     if staticVersion is not None:
-        lines.append(f"staticVer: \"{staticVersion}\"")
+        meta["elyxbuilder"]["staticVer"] = staticVersion
     if staticClient is not None:
-        lines.append(f"client: \"{staticClient}\"")
-    return original.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+        meta["elyxbuilder"]["client"] = staticClient
+
+    return json.dumps(meta, indent=2, ensure_ascii=False) if metaPath.endswith(".json") else yaml.dump(meta, allow_unicode=True, sort_keys=False)
 
 def compileSourceFiles(sourceDir: str, cacheDir: str, ignoreAbsPaths: set[str], log, bar: "ProgressBar | None" = None, obfuscateAll: bool = False, obfuscateFiles: frozenset[str] = frozenset(), protectedNames: frozenset[str] = frozenset(), localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None, optimizeLevel: int = 1) -> tuple[bool, dict]:
     if obfConfig is None:
@@ -197,7 +198,7 @@ def compileSourceFiles(sourceDir: str, cacheDir: str, ignoreAbsPaths: set[str], 
         print(f"{RED}error: invalid optimize level {optimizeLevel!r}. Must be 0, 1, or 2.{RESET}")
         return False, {}
     import random
-    from elyb.cmds.obfuscate import applyObfuscationPipeline
+    from cmds.obfuscate import applyObfuscationPipeline
     python311 = findPython311()
     if python311 is None:
         print(
