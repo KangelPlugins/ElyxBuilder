@@ -33,7 +33,7 @@ elyb watch 10 -a "-c"
 | `• Changes found` | Обнаружены изменения |
 | `• Starting the built` | Сборка запускается |
 | `• Built successfully: builds/latest.eaf` | Сборка успешна (зелёным) |
-| `• Built failed: {ошибка}` | Сборка упала (красным) |
+| `• Build failed: {ошибка}` | Сборка упала (красным) |
 | `• Paused` | Опрос на паузе |
 | `• Resumed` | Опрос возобновлён |
 | `• Bye-bye` | При выходе |

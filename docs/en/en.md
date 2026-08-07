@@ -2,10 +2,12 @@
 
 CLI tool for building Elyx plugins.
 
+Fork of [shareui/ElyxBuilder](https://github.com/shareui/ElyxBuilder).
+
 ## Installation
 
 ```
-pip install ElyxBuilder
+pip install elyxbuilder-cli
 ```
 
 ## Requirements
@@ -205,7 +207,7 @@ The output archive is always saved as `builds/latest.eaf` (or the appropriate ex
 | `• Changes found` | Changes detected |
 | `• Starting the built` | Build is about to start |
 | `• Built successfully: builds/latest.eaf` | Build succeeded (green) |
-| `• Built failed: {error}` | Build failed (red) |
+| `• Build failed: {error}` | Build failed (red) |
 | `• Paused` | Polling paused |
 | `• Resumed` | Polling resumed |
 | `• Bye-bye` | On quit |
@@ -515,5 +517,20 @@ obfuscation:
 All keys are optional. The default for each is `true`, except `zlibCompression` which defaults to `false`. Set a key to `false` to disable the corresponding pipeline stage.
 
 The `removeLogs` setting also applies to plain (non-obfuscated) builds — log calls are stripped from `.py` files that are included in the archive as source.
+
+#### `obfuscationIgnore`
+
+New config key that allows independent control over which files are obfuscated vs compiled. Previously `compilationIgnore` was used for both.
+
+```yaml
+compilationIgnore:
+  - MyPlugin/src/helpers.py
+obfuscationIgnore:
+  - MyPlugin/src/helpers.py
+```
+
+- Files in `compilationIgnore` are **not compiled** to `.pyc` but **are obfuscated as source** (remain `.py`).
+- Files in `obfuscationIgnore` are **not obfuscated** — included in the archive as-is.
+- If a file is in both lists, it is neither compiled nor obfuscated.
 
 > **Note:** `zlibCompression` is incompatible with `--compile`. When enabled, the output is a plain `.py` launcher; it cannot be compiled to `.pyc`.

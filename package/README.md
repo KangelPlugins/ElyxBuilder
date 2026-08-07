@@ -1,7 +1,9 @@
 # ElyxBuilder
 
-Utility for building ElyxCore plugins.
+Fork of [shareui/ElyxBuilder](https://github.com/shareui/ElyxBuilder) — CLI tool for building ElyxCore plugins.
 
-Full information about the project, as well as the source code, can be found [here](https://github.com/shareui/ElyxBuilder).
+```
+pip install elyxbuilder-cli
+```
 
-By shareui with ❤️
+Full documentation: [docs](https://github.com/KangelPlugins/ElyxBuilder/blob/main/docs)

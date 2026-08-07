@@ -22,7 +22,7 @@ Fork of [shareui/ElyxBuilder](https://github.com/sahreui/ElyxBuilder) — a CLI 
 
 ## Installation
 
-Not For now , after on Pypi ^^
+pip install elyxbuilder-cli -U (--break-system-packages if you on Linux and install global)
 
 ## Quick start
 

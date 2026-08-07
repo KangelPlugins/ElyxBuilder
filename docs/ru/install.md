@@ -2,10 +2,12 @@
 
 CLI-инструмент для сборки Elyx-плагинов.
 
+Fork of [shareui/ElyxBuilder](https://github.com/shareui/ElyxBuilder).
+
 ## Установка
 
 ```
-pip install ElyxBuilder
+pip install elyxbuilder-cli
 ```
 
 ## Требования
