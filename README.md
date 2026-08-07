@@ -1,6 +1,11 @@
 # ElyxBuilder
 
-A CLI tool for building **ElyxCore** plugins — scaffold, compile, and package your plugin in one package.
+Fork of [shareui/ElyxBuilder](https://github.com/sahreui/ElyxBuilder) — a CLI tool for building **ElyxCore** plugins.
+
+## Changes from upstream
+
+- **Decoupled `obfuscationIgnore` from `compilationIgnore`** — new config key allows independent control over which files get obfuscated vs compiled. Files in `compilationIgnore` are now obfuscated as source (not compiled to `.pyc`).
+- Saves obfuscation mapping after compilation.
 
 ## Features
 
@@ -12,7 +17,7 @@ A CLI tool for building **ElyxCore** plugins — scaffold, compile, and package 
 
 ## Installation
 
-Please use the releases page on GitHub: [shareui/ElyxBuilder/releases](https://github.com/shareui/ElyxBuilder/releases)
+Not For now , after on Pypi ^^
 
 ## Quick start
 
@@ -23,8 +28,8 @@ elyb build -c -v
 
 ## Documentation
 
-- [English](https://github.com/shareui/ElyxBuilder/blob/main/docs)
-- [Русский](https://github.com/shareui/ElyxBuilder/blob/main/docs)
+- [English](https://github.com/KangelPlugins/ElyxBuilder/blob/main/docs)
+- [Русский](https://github.com/KangelPlugins/ElyxBuilder/blob/main/docs)
 
 ## Requirements
 
