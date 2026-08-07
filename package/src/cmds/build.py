@@ -191,14 +191,14 @@ def buildMetaInfo(metaPath: str, compiled: bool, buildNum: int, compilePythonVer
 
     return json.dumps(meta, indent=2, ensure_ascii=False) if metaPath.endswith(".json") else yaml.dump(meta, allow_unicode=True, sort_keys=False)
 
-def compileSourceFiles(sourceDir: str, cacheDir: str, ignoreAbsPaths: set[str], log, bar: "ProgressBar | None" = None, obfuscateAll: bool = False, obfuscateFiles: frozenset[str] = frozenset(), protectedNames: frozenset[str] = frozenset(), localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None, optimizeLevel: int = 1) -> tuple[bool, dict]:
+def compileSourceFiles(sourceDir: str, cacheDir: str, ignoreAbsPaths: set[str], log, bar: "ProgressBar | None" = None, obfuscateAll: bool = False, obfuscateFiles: frozenset[str] = frozenset(), protectedNames: frozenset[str] = frozenset(), localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None, optimizeLevel: int = 1, obfIgnoreAbsPaths: set[str] | None = None, obfuscatedSources: dict[str, bytes] | None = None, obfuscationMapping: dict[str, dict] | None = None, arcBase: str | None = None) -> tuple[bool, dict]:
     if obfConfig is None:
         obfConfig = {}
     if optimizeLevel not in (0, 1, 2):
         print(f"{RED}error: invalid optimize level {optimizeLevel!r}. Must be 0, 1, or 2.{RESET}")
         return False, {}
     import random
-    from cmds.obfuscate import applyObfuscationPipeline
+    from .obfuscate import applyObfuscationPipeline
     python311 = findPython311()
     if python311 is None:
         print(
@@ -221,11 +221,28 @@ def compileSourceFiles(sourceDir: str, cacheDir: str, ignoreAbsPaths: set[str], 
             normalizedAbs = os.path.normpath(absPath)
             if normalizedAbs in ignoreAbsPaths:
                 log(f"  compile: skip {os.path.relpath(absPath, sourceDir)}")
+                # Even skipped-from-compile files can be obfuscated (compilationIgnore ≠ obfuscationIgnore)
+                _obfSkip2 = obfIgnoreAbsPaths if obfIgnoreAbsPaths is not None else ignoreAbsPaths
+                if normalizedAbs in _obfSkip2:
+                    continue
+                # This file is compiled-but-not-compiled; obfuscate source and write to arc
+                relPath = os.path.relpath(absPath, sourceDir).replace(os.sep, "/")
+                if obfuscateAll or relPath in obfuscateFiles:
+                    from .obfuscate import applyObfuscationPipelineWithMapping
+                    with open(absPath, "r", encoding="utf-8") as f:
+                        source = f.read()
+                    xorKey = random.randint(1, 254)
+                    obfuscated, fileMapping = applyObfuscationPipelineWithMapping(source, protectedNames, xorKey, localClassNames, obfConfig)
+                    arcKey = os.path.relpath(absPath, arcBase).replace(os.sep, "/") if arcBase else relPath
+                    obfuscatedSources[arcKey] = obfuscated.encode("utf-8")
+                    obfuscationMapping[relPath] = fileMapping
+                    log(f"  obfuscated (source): {relPath}")
                 continue
             relPath = os.path.relpath(absPath, sourceDir).replace(os.sep, "/")
             # files in compilationIgnore are never obfuscated (In the glow of starry sky, seven nights I would lie Now I know I wanna stay, I will never go away In the moonlight)
+            _obfSkip = obfIgnoreAbsPaths if obfIgnoreAbsPaths is not None else ignoreAbsPaths
             shouldObfuscate = (
-                normalizedAbs not in ignoreAbsPaths
+                normalizedAbs not in _obfSkip
                 and (obfuscateAll or relPath in obfuscateFiles)
             )
 
@@ -468,6 +485,13 @@ def runBuild(noAssets: bool = False, noFolder: bool = False, verbose: bool = Fal
         rawIgnore = config.get("compilationIgnore") or []
         ignoreAbsPaths = {os.path.normpath(os.path.join(cwd, p)) for p in rawIgnore}
 
+        # obfuscationIgnore decouples obfuscation from compilationIgnore
+        rawObfIgnore = config.get("obfuscationIgnore")
+        if rawObfIgnore is not None:
+            obfIgnoreAbsPaths = {os.path.normpath(os.path.join(cwd, p)) for p in rawObfIgnore}
+        else:
+            obfIgnoreAbsPaths = ignoreAbsPaths
+
         from elyb.cmds.obfuscate import collectProtectedNames, collectLocalClassNames, applyObfuscationPipelineWithMapping
         import random
         protectedNames = collectProtectedNames(sourceDir)
@@ -483,7 +507,7 @@ def runBuild(noAssets: bool = False, noFolder: bool = False, verbose: bool = Fal
                     continue
                 absPath = os.path.join(root, file)
                 normalizedAbs = os.path.normpath(absPath)
-                if normalizedAbs in ignoreAbsPaths:
+                if normalizedAbs in obfIgnoreAbsPaths:
                     continue
                 relPath = os.path.relpath(absPath, sourceDir)
                 relPathUnix = relPath.replace(os.sep, "/")
@@ -522,6 +546,17 @@ def runBuild(noAssets: bool = False, noFolder: bool = False, verbose: bool = Fal
         ignoreAbsPaths = {os.path.normpath(os.path.join(cwd, p)) for p in rawIgnore}
         log(f"compile: scanning {sourceDir}, ignoring {len(ignoreAbsPaths)} file(s)")
 
+        # obfuscationIgnore decouples obfuscation from compilationIgnore
+        rawObfIgnore = config.get("obfuscationIgnore")
+        if rawObfIgnore is not None:
+            obfIgnoreAbsPaths = {os.path.normpath(os.path.join(cwd, p)) for p in rawObfIgnore}
+            log(f"compile: obfuscation ignore: {len(obfIgnoreAbsPaths)} file(s)")
+        else:
+            obfIgnoreAbsPaths = None  # fall back to compilationIgnore
+
+        obfuscatedSources: dict[str, bytes] = {}
+        obfuscationMapping: dict[str, dict] = {}
+
         protectedNames: frozenset[str] = frozenset()
         localClassNames: frozenset[str] = frozenset()
         if obfuscation is not None:
@@ -530,12 +565,20 @@ def runBuild(noAssets: bool = False, noFolder: bool = False, verbose: bool = Fal
             localClassNames = collectLocalClassNames(sourceDir)
             log(f"obfuscation: collected {len(protectedNames)} protected name(s)")
 
+        obfuscationMapping: dict[str, dict] = {}
+
         status("Compiling to bytecode")
-        ok, _ = compileSourceFiles(sourceDir, cacheDir, ignoreAbsPaths, log, bar, obfuscateAll, obfuscateFiles, protectedNames, localClassNames, obfConfig, compileLevel)
+        ok, _ = compileSourceFiles(sourceDir, cacheDir, ignoreAbsPaths, log, bar, obfuscateAll, obfuscateFiles, protectedNames, localClassNames, obfConfig, compileLevel, obfIgnoreAbsPaths=obfIgnoreAbsPaths, obfuscatedSources=obfuscatedSources, obfuscationMapping=obfuscationMapping, arcBase=arcBase)
         if not ok:
             bar.stop()
             incrementFailedBuildStats(builderDir)
             return
+
+        if obfuscation is not None and obfuscationMapping and obfConfig.get("saveMapping", True):
+            mappingPath = os.path.join(buildsDir, "latest_mapping.json")
+            with open(mappingPath, "w", encoding="utf-8") as f:
+                json.dump(obfuscationMapping, f, indent=2, ensure_ascii=False)
+            log(f"mapping saved: {mappingPath}")
 
     statsPath = os.path.join(builderDir, "stats.yml")
     buildNum = loadStats(statsPath)["builds"] + 1
@@ -605,9 +648,13 @@ def runBuild(noAssets: bool = False, noFolder: bool = False, verbose: bool = Fal
                 if compileLevel is not None and file.endswith(".py"):
                     normalizedAbs = os.path.normpath(absPath)
                     if normalizedAbs in ignoreAbsPaths:
-                        # ignored from compilation — include as .py as-is
-                        zf.write(absPath, arcName)
-                        log(f"  + {arcName} (not compiled)")
+                        # ignored from compilation — check if obfuscated version exists
+                        if arcName in obfuscatedSources:
+                            zf.writestr(arcName, obfuscatedSources[arcName])
+                            log(f"  + {arcName} (obfuscated, source)")
+                        else:
+                            zf.write(absPath, arcName)
+                            log(f"  + {arcName} (not compiled)")
                         fileCount += 1
                         bar.advance()
                         continue
