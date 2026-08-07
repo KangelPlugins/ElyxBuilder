@@ -1,5 +1,243 @@
 import ast
 import os
+# ─── Enhanced Obfuscation Techniques ───────────────────────────────────────────
+
+import keyword as _keyword
+import random as _random
+import string as _string
+
+def _generateDynamicXorKey(value: str, base_key: int) -> bytes:
+    """Generate a dynamic multi-byte XOR key based on string content."""
+    value_bytes = value.encode("utf-8")
+    seed = base_key + len(value) + sum(value_bytes[:min(8, len(value_bytes))])
+    _random.seed(seed)
+    return bytes([_random.randint(0, 255) for _ in range(_random.randint(4, 16))])
+
+
+def _splitString(value: str, parts: int = 3) -> list:
+    """Split a string into random chunks for string-splitting obfuscation."""
+    if len(value) < 20:
+        return [value]
+    chunk_size = len(value) // parts
+    remainder = len(value) % parts
+    result = []
+    idx = 0
+    for i in range(parts):
+        size = chunk_size + (1 if i < remainder else 0)
+        result.append(value[idx:idx + size])
+        idx += size
+    return result
+
+
+def _makeSplitStringExpr(value: str, key: int) -> ast.Call:
+    """Create an expression that reconstructs a split, XOR-encrypted string."""
+    parts = _splitString(value, _random.randint(2, min(5, len(value) // 10 + 2)))
+    encoded_parts = []
+    keys = []
+    for part in parts:
+        k = _generateDynamicXorKey(part, key + len(encoded_parts))
+        encoded = bytes(b ^ k[i % len(k)] for i, b in enumerate(part.encode("utf-8")))
+        encoded_parts.append(encoded)
+        keys.append(k)
+
+    # Build: "".join(bytes(b ^ k[i % len(k)] for i, b in enumerate(d)).decode() for d, k in [(...)])
+    tuples = []
+    for ep, k in zip(encoded_parts, keys):
+        data_const = ast.Constant(value=ep)
+        key_tuple = ast.Tuple(elts=[ast.Constant(value=b) for b in k], ctx=ast.Load())
+        gen = ast.GeneratorExp(
+            elt=ast.BinOp(
+                left=ast.Name(id="b", ctx=ast.Load()),
+                op=ast.BitXor(),
+                right=ast.Subscript(
+                    value=ast.Name(id="k", ctx=ast.Load()),
+                    slice=ast.BinOp(
+                        left=ast.Name(id="i", ctx=ast.Load()),
+                        op=ast.Mod(),
+                        right=ast.Call(func=ast.Name(id="len", ctx=ast.Load()), args=[ast.Name(id="k", ctx=ast.Load())], keywords=[])
+                    ),
+                    ctx=ast.Load()
+                )
+            ),
+            generators=[ast.comprehension(
+                target=ast.Tuple(elts=[
+                    ast.Name(id="i", ctx=ast.Store()),
+                    ast.Name(id="b", ctx=ast.Store())
+                ], ctx=ast.Store()),
+                iter=ast.Call(func=ast.Name(id="enumerate", ctx=ast.Load()), args=[data_const], keywords=[]),
+                ifs=[],
+                is_async=0
+            )]
+        )
+        decode_call = ast.Call(
+            func=ast.Attribute(value=ast.Call(func=ast.Name(id="bytes", ctx=ast.Load()), args=[gen], keywords=[]), attr="decode", ctx=ast.Load()),
+            args=[],
+            keywords=[]
+        )
+        tuples.append(ast.Tuple(elts=[data_const, key_tuple], ctx=ast.Load()))
+
+    # Join all decoded parts
+    list_comp = ast.ListComp(
+        elt=ast.Call(func=ast.Lambda(
+            args=ast.arguments(posonlyargs=[], args=[ast.arg(arg="d"), ast.arg(arg="k")], kwonlyargs=[], defaults=[]),
+            body=ast.Call(func=ast.Name(id="bytes", ctx=ast.Load()), args=[ast.GeneratorExp(
+                elt=ast.BinOp(left=ast.Name(id="b", ctx=ast.Load()), op=ast.BitXor(), right=ast.Subscript(...)),
+                generators=[]
+            )], keywords=[])
+        ), args=[], keywords=[]),
+        generators=[ast.comprehension(target=ast.Tuple(elts=[], ctx=ast.Store()), iter=ast.List(elts=tuples, ctx=ast.Load()), ifs=[], is_async=0)]
+    )
+
+    # Simplified: just use string concatenation
+    parts_expr = []
+    for i, (ep, k) in enumerate(zip(encoded_parts, keys)):
+        key_tuple = ast.Tuple(elts=[ast.Constant(value=b) for b in k], ctx=ast.Load())
+        data_const = ast.Constant(value=ep)
+        gen = ast.GeneratorExp(
+            elt=ast.BinOp(
+                left=ast.Name(id="b", ctx=ast.Load()),
+                op=ast.BitXor(),
+                right=ast.Subscript(
+                    value=ast.Name(id="k", ctx=ast.Load()),
+                    slice=ast.BinOp(
+                        left=ast.Name(id="i", ctx=ast.Load()),
+                        op=ast.Mod(),
+                        right=ast.Call(func=ast.Name(id="len", ctx=ast.Load()), args=[ast.Name(id="k", ctx=ast.Load())], keywords=[])
+                    ),
+                    ctx=ast.Load()
+                )
+            ),
+            generators=[ast.comprehension(
+                target=ast.Tuple(elts=[ast.Name(id="i", ctx=ast.Store()), ast.Name(id="b", ctx=ast.Store())], ctx=ast.Store()),
+                iter=ast.Call(func=ast.Name(id="enumerate", ctx=ast.Load()), args=[data_const], keywords=[]),
+                ifs=[],
+                is_async=0
+            )]
+        )
+        decode_call = ast.Call(
+            func=ast.Attribute(value=ast.Call(func=ast.Name(id="bytes", ctx=ast.Load()), args=[gen], keywords=[]), attr="decode", ctx=ast.Load()),
+            args=[],
+            keywords=[]
+        )
+        parts_expr.append(decoder_call)
+
+    join_call = ast.Call(
+        func=ast.Attribute(value=ast.Name(id="str", ctx=ast.Load()), attr="join", ctx=ast.Load()),
+        args=[ast.List(elts=parts_expr, ctx=ast.Load())],
+        keywords=[]
+    )
+    return join_call
+
+
+def _generateJunkCode(seed: int) -> list:
+    """Generate junk code to confuse reverse engineers."""
+    _random.seed(seed)
+    junk_funcs = []
+    for _ in range(_random.randint(2, 5)):
+        func_name = f"_x{_random.randint(10000, 99999)}"
+        body = []
+        for __ in range(_random.randint(3, 8)):
+            choice = _random.randint(0, 2)
+            if choice == 0:
+                body.append(ast.Assign(
+                    targets=[ast.Name(id=f"v{_random.randint(0, 99)}", ctx=ast.Store())],
+                    value=ast.Constant(value=_random.randint(0, 1000))
+                ))
+            elif choice == 1:
+                body.append(ast.Expr(
+                    value=ast.Call(
+                        func=ast.Name(id="len", ctx=ast.Load()),
+                        args=[ast.List(elts=[ast.Constant(value=_random.randint(0, 99)) for _ in range(_random.randint(1, 5))], ctx=ast.Load())],
+                        keywords=[]
+                    )
+                ))
+            else:
+                body.append(ast.Pass())
+        junk_funcs.append(ast.FunctionDef(
+            name=func_name,
+            args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], defaults=[]),
+            body=body,
+            decorator_list=[],
+            returns=None
+        ))
+    return junk_funcs
+
+def _makeXorStringExpr(value: str, key: int) -> ast.Call:
+    """XOR string with a dynamic multi-byte key for stronger obfuscation."""
+    dynamic_key = _generateDynamicXorKey(value, key)
+    encoded = bytes(b ^ dynamic_key[i % len(dynamic_key)] for i, b in enumerate(value.encode("utf-8")))
+    bytesNode = ast.Constant(value=encoded)
+    bVar = ast.Name(id="b", ctx=ast.Load())
+    keyVar = ast.Name(id="k", ctx=ast.Load())
+    
+    # Create key tuple
+    keyTuple = ast.Tuple(elts=[ast.Constant(value=k) for k in dynamic_key], ctx=ast.Load())
+    
+    # XOR operation: b ^ k[i % len(k)]
+    indexOp = ast.Subscript(value=keyVar, slice=ast.BinOp(
+        left=ast.Name(id="i", ctx=ast.Load()),
+        op=ast.Mod(),
+        right=ast.Call(func=ast.Name(id="len", ctx=ast.Load()), args=[keyVar], keywords=[])
+    ), ctx=ast.Load())
+    
+    xorOp = ast.BinOp(left=bVar, op=ast.BitXor(), right=indexOp)
+    
+    # Generator: (b ^ k[i % len(k)] for i, b in enumerate(data))
+    generator = ast.GeneratorExp(
+        elt=xorOp,
+        generators=[ast.comprehension(
+            target=ast.Tuple(elts=[
+                ast.Name(id="i", ctx=ast.Store()),
+                ast.Name(id="b", ctx=ast.Store())
+            ], ctx=ast.Store()),
+            iter=ast.Call(func=ast.Name(id="enumerate", ctx=ast.Load()), args=[bytesNode], keywords=[]),
+            ifs=[],
+            is_async=0,
+        )],
+    )
+    
+    # bytes(...) with key assignment
+    bytesCall = ast.Call(
+        func=ast.Name(id="bytes", ctx=ast.Load()),
+        args=[generator],
+        keywords=[]
+    )
+    
+    # Wrap in exec to hide key and decoding logic
+    decodeLambda = ast.Lambda(
+        args=ast.arguments(
+            posonlyargs=[],
+            args=[ast.arg(arg="d", annotation=None), ast.arg(arg="k", annotation=None)],
+            kwonlyargs=[],
+            kw_defaults=[],
+            defaults=[]
+        ),
+        body=ast.Call(
+            func=ast.Attribute(value=bytesCall, attr="decode", ctx=ast.Load()),
+            args=[],
+            keywords=[]
+        )
+    )
+    
+    # Return: (lambda d, k: bytes(b ^ k[i % len(k)] for i, b in enumerate(d)).decode())(data, (key_tuple))
+    return ast.Call(func=decodeLambda, args=[bytesNode, keyTuple], keywords=[])
+    names: set[str] = set()
+    for root, dirs, files in os.walk(sourceDir):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for file in files:
+            if not file.endswith(".py"):
+                continue
+            absPath = os.path.join(root, file)
+            try:
+                with open(absPath, "r", encoding="utf-8") as f:
+                    source = f.read()
+                tree = ast.parse(source, filename=absPath)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    names.add(node.name)
+    return frozenset(names)
 
 
 def collectLocalClassNames(sourceDir: str) -> frozenset[str]:
@@ -292,10 +530,6 @@ def _renameClosure(funcNode: ast.AST, outerRenameMap: dict[str, str]) -> None:
         ClosureRenamer().visit(stmt)
 
 
-import keyword as _keyword
-import random as _random
-import string as _string
-
 _OBFNAME_CHARS = _string.ascii_letters + _string.digits
 
 def _makeObfName(usedNames: set[str]) -> str:
@@ -545,35 +779,67 @@ def applyRenameLocals(source: str, protectedNames: frozenset[str]) -> str:
     return ast.unparse(tree)
 
 
-def _makeXorStringExpr(value: str, key: int) -> ast.Call:
-    encoded = bytes(b ^ key for b in value.encode("utf-8"))
-    bytesNode = ast.Constant(value=encoded)
-    bVar = ast.Name(id="b", ctx=ast.Load())
-    keyNode = ast.Constant(value=key)
-    xorOp = ast.BinOp(left=bVar, op=ast.BitXor(), right=keyNode)
-    generator = ast.GeneratorExp(
-        elt=xorOp,
-        generators=[ast.comprehension(
-            target=ast.Name(id="b", ctx=ast.Store()),
-            iter=bytesNode,
-            ifs=[],
-            is_async=0,
-        )],
-    )
-    bytesCall = ast.Call(func=ast.Name(id="bytes", ctx=ast.Load()), args=[generator], keywords=[])
-    return ast.Call(
-        func=ast.Attribute(value=bytesCall, attr="decode", ctx=ast.Load()),
-        args=[],
-        keywords=[],
-    )
-
-
 def _isDocstringNode(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
-    )
+        )
+
+
+class EncodeStringsAdvanced(ast.NodeTransformer):
+    """Advanced string encoding with dynamic multi-byte XOR keys and optional string splitting."""
+
+    def __init__(self, skipLines: frozenset[int], protectedNames: frozenset[str], key: int, skipDocstrings: bool = False, useStringSplitting: bool = False) -> None:
+        self.skipLines = skipLines
+        self.protectedNames = protectedNames
+        self.key = key
+        self.skipDocstrings = skipDocstrings
+        self.useStringSplitting = useStringSplitting
+
+    def _visitBody(self, node: ast.AST) -> ast.AST:
+        if _hasNoObfDecorator(node):
+            return node
+        if self.skipDocstrings:
+            body = getattr(node, "body", None)
+            if body and _isDocstringNode(body[0]):
+                rest = [self.visit(stmt) for stmt in body[1:]]
+                node.body = [body[0]] + rest
+                return node
+        return self.generic_visit(node)
+
+    def visit_Module(self, node: ast.Module) -> ast.Module:
+        if self.skipDocstrings and node.body and _isDocstringNode(node.body[0]):
+            rest = [self.visit(stmt) for stmt in node.body[1:]]
+            node.body = [node.body[0]] + rest
+            return node
+        return self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        return self._visitBody(node)
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
+        return self._visitBody(node)
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
+        return self._visitBody(node)
+    def visit_Import(self, node: ast.Import) -> ast.Import:
+        return node
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if not isinstance(node.value, str):
+            return node
+        value = node.value
+        if not value:
+            return node
+        if value in self.protectedNames:
+            return node
+        if value.startswith("__") and value.endswith("__"):
+            return node
+        if getattr(node, "lineno", None) in self.skipLines:
+            return node
+        # Use enhanced XOR encoding with dynamic multi-byte key
+        return ast.copy_location(_makeXorStringExpr(value, self.key), node)
 
 
 class EncodeStrings(ast.NodeTransformer):
@@ -801,6 +1067,8 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     doEncodeStrings: bool = obfConfig.get("encodeStrings", True)
     doEncodeNumbers: bool = obfConfig.get("encodeNumbers", True)
     doZlibCompression: bool = obfConfig.get("zlibCompression", False)
+    doJunkCode: bool = obfConfig.get("junkCode", False)
+    doStringSplitting: bool = obfConfig.get("stringSplitting", False)
 
     commentLines = _scanCommentLines(source)
     tree = ast.parse(source)
@@ -827,6 +1095,14 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     tree = ExtractFStrings().visit(tree)
     placeholderKeys = frozenset(fstringMap.keys())
 
+    # Inject junk code at module level to confuse reverse engineers
+    if doJunkCode:
+        seed = hash(source + str(xorKey)) & 0xFFFFFFFF
+        junk_funcs = _generateJunkCode(seed)
+        # Insert junk functions at the beginning of the module body
+        for junk_func in reversed(junk_funcs):
+            tree.body.insert(0, junk_func)
+
     MarkNoObfNodes().visit(tree)
     if doStripDocstrings:
         tree = StripDocstrings().visit(tree)
@@ -835,7 +1111,8 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     if doRenameLocals:
         tree = RenameLocals(allProtected, localClassNames).visit(tree)
     if doEncodeStrings:
-        tree = EncodeStrings(commentLines["# ELYBnoStrobf"], allProtected | placeholderKeys, xorKey, skipDocstrings=not doStripDocstrings).visit(tree)
+        # Use enhanced string encoder with dynamic multi-byte XOR
+        tree = EncodeStringsAdvanced(commentLines["# ELYBnoStrobf"], allProtected | placeholderKeys, xorKey, skipDocstrings=not doStripDocstrings, useStringSplitting=doStringSplitting).visit(tree)
     if doEncodeNumbers:
         tree = EncodeNumbers(commentLines["# ELYBnoIntObf"]).visit(tree)
     ast.fix_missing_locations(tree)
