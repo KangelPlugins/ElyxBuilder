@@ -107,7 +107,11 @@ def main():
         runCached()
         return
     if args.command == "watch":
-        buildArgs = shlex.split(args.buildArgs) if args.buildArgs.strip() else []
+        try:
+            buildArgs = shlex.split(args.buildArgs) if args.buildArgs.strip() else []
+        except ValueError as e:
+            print(f"error: invalid build args: {e}")
+            sys.exit(1)
         runWatch(args.interval, buildArgs)
         return
     if args.command == "stats":

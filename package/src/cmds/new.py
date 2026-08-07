@@ -587,7 +587,7 @@ def runInteractive():
     sys.stdout.flush()
 
 
-def runNew(pluginname: str, author: str):
+def runNew(pluginname: str, author: str, zipformat: str = "eaf"):
     normalized       = normalizeName(pluginname)
     normalizedAuthor = normalizeName(author)
     cfg              = loadConfig()
@@ -597,7 +597,7 @@ def runNew(pluginname: str, author: str):
     writePlugin(
         pluginname, normalized, author, pluginId,
         "0.1.0", cfg["appVersion"], cfg["sdkVersion"], cfg["elyxVersion"],
-        ""
+        "", zipformat=zipformat
     )
 
 
@@ -613,12 +613,13 @@ def writePlugin(
     icon: str,
     refmapFmt: str = "yaml",
     metainfoFmt: str = "yaml",
+    zipformat: str = "eaf",
 ):
     base = normalized
 
     writeFile(
         f"{base}/.elyxbuilder/config.yml",
-        f'zipFormat: eaf\n'
+        f'zipFormat: {zipformat}\n'
         f'source: {normalized}/src\n'
         f'buildNameUncompiled: "{{name}}-{{version}}"\n'
         f'buildNameCompiled: "{{name}}-{{version}}-3.11"\n'

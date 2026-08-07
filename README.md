@@ -6,6 +6,11 @@ Fork of [shareui/ElyxBuilder](https://github.com/sahreui/ElyxBuilder) — a CLI 
 
 - **Decoupled `obfuscationIgnore` from `compilationIgnore`** — new config key allows independent control over which files get obfuscated vs compiled. Files in `compilationIgnore` are now obfuscated as source (not compiled to `.pyc`).
 - Saves obfuscation mapping after compilation.
+- **`elyb watch`** — watch mode for automatic rebuilds on file changes.
+- **Building progress** — visual progress indicator during build.
+- **Fix: `runNew()` zipformat argument** — `elyb new -zf` now correctly writes the format to config instead of crashing.
+- **Fix: typo `"Built failed"` → `"Build failed"`** in watch output.
+- **Fix: `shlex.split()` crash** on unbalanced quotes in watch args — now shows a clean error instead of a traceback.
 
 ## Features
 

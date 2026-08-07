@@ -229,7 +229,7 @@ def runWatch(intervalSeconds: int, buildArgs: list[str]) -> None:
             except SystemExit as e:
                 exitedClean = (e.code == 0 or e.code is None)
             except Exception as e:
-                ui.addLog(f"{RED}• Built failed: {e}{RESET}")
+                ui.addLog(f"{RED}• Build failed: {e}{RESET}")
                 prevSnapshot = scanPluginFiles(cwd)
                 ui.resetTimer()
                 continue
@@ -259,7 +259,7 @@ def runWatch(intervalSeconds: int, buildArgs: list[str]) -> None:
                         break
                 if not errorLine:
                     errorLine = output.splitlines()[-1] if output.strip() else "unknown error"
-                ui.addLog(f"{RED}• Built failed: {errorLine}{RESET}")
+                ui.addLog(f"{RED}• Build failed: {errorLine}{RESET}")
 
             prevSnapshot = scanPluginFiles(cwd)
             ui.resetTimer()
