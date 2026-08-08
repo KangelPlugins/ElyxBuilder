@@ -438,17 +438,17 @@ For classes that inherit from an external base (not defined in the project), met
 
 #### 4. Encode strings (`encodeStrings`)
 
-Replaces string literals with a XOR-decode expression:
+Replaces string literals with a XOR-decode expression using a dynamic multi-byte key:
 
 ```python
 # original
 x = "hello"
 
 # obfuscated
-x = bytes(b ^ 42 for b in b'\x66\x4f\x46\x46\x45').decode()
+x = (lambda d, k: bytes((b ^ k[i % len(k)] for i, b in enumerate(b'\xa5\x9c$\xc6\x7f'))).decode())(b'\xa5\x9c$\xc6\x7f', (205, 249, 72, 170, 16, 171, 20, 51, 221))
 ```
 
-The XOR key is a random byte chosen per build. Import statements are never touched. Lines marked with `# ELYBnoStrobf` are skipped. F-strings are preserved as-is (extracted before the pipeline, restored after).
+The key is multi-byte (8–16 bytes), deterministically derived from the string content and the build key. Decoding is wrapped in a lambda, hiding the decode logic from static analysis. Import statements are never touched. Lines marked with `# ELYBnoStrobf` are skipped. F-strings are preserved as-is (extracted before the pipeline, restored after).
 
 #### 5. Encode numbers (`encodeNumbers`)
 
@@ -464,7 +464,24 @@ x = 27736 ^ 26792
 
 Trivial values `0`, `1`, and `-1` are not encoded — they are too common and the noise would outweigh the benefit. Booleans are never touched. Lines marked with `# ELYBnoIntObf` are skipped.
 
-#### 6. zlib compression (`zlibCompression`)
+#### 6. Junk code injection (`junkCode`)
+
+Inserts 2–5 decoy functions with useless code (random assignments, `len(...)` calls, `pass`) at the top of every module — noise that slows manual analysis:
+
+```python
+def _x93566():
+    len([43, 66])
+    YwVE = 993
+    nZvavo4Pg4 = 384
+
+def _x98820():
+    len([90, 11, 79])
+    nJdEA = 873
+```
+
+The functions are deterministic per build (seed derived from source and key) and get random names. Enabled by default.
+
+#### 7. zlib compression (`zlibCompression`)
 
 The final stage. Compresses the obfuscated source with zlib (level 9), base64-encodes it, reverses the bytes, and wraps the whole file in a two-line exec launcher:
 
@@ -511,10 +528,14 @@ obfuscation:
   renameLocals: true
   encodeStrings: true
   encodeNumbers: true
+  junkCode: true
+  stringSplitting: true
   zlibCompression: false
 ```
 
 All keys are optional. The default for each is `true`, except `zlibCompression` which defaults to `false`. Set a key to `false` to disable the corresponding pipeline stage.
+
+`junkCode` injects decoy functions at the top of the module. `stringSplitting` prepares long strings to be split into fragments before encoding.
 
 The `removeLogs` setting also applies to plain (non-obfuscated) builds — log calls are stripped from `.py` files that are included in the archive as source.
 

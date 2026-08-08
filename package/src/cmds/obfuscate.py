@@ -1,13 +1,10 @@
 import ast
-import os
-# ─── Enhanced Obfuscation Techniques ───────────────────────────────────────────
-
 import keyword as _keyword
+import os
 import random as _random
 import string as _string
 
 def _generateDynamicXorKey(value: str, base_key: int) -> bytes:
-    """Generate a dynamic multi-byte XOR key based on string content."""
     value_bytes = value.encode("utf-8")
     seed = base_key + len(value) + sum(value_bytes[:min(8, len(value_bytes))])
     _random.seed(seed)
@@ -15,7 +12,6 @@ def _generateDynamicXorKey(value: str, base_key: int) -> bytes:
 
 
 def _splitString(value: str, parts: int = 3) -> list:
-    """Split a string into random chunks for string-splitting obfuscation."""
     if len(value) < 20:
         return [value]
     chunk_size = len(value) // parts
@@ -30,7 +26,6 @@ def _splitString(value: str, parts: int = 3) -> list:
 
 
 def _makeSplitStringExpr(value: str, key: int) -> ast.Call:
-    """Create an expression that reconstructs a split, XOR-encrypted string."""
     parts = _splitString(value, _random.randint(2, min(5, len(value) // 10 + 2)))
     encoded_parts = []
     keys = []
@@ -130,7 +125,6 @@ def _makeSplitStringExpr(value: str, key: int) -> ast.Call:
 
 
 def _generateJunkCode(seed: int) -> list:
-    """Generate junk code to confuse reverse engineers."""
     _random.seed(seed)
     junk_funcs = []
     for _ in range(_random.randint(2, 5)):
@@ -163,7 +157,6 @@ def _generateJunkCode(seed: int) -> list:
     return junk_funcs
 
 def _makeXorStringExpr(value: str, key: int) -> ast.Call:
-    """XOR string with a dynamic multi-byte key for stronger obfuscation."""
     dynamic_key = _generateDynamicXorKey(value, key)
     encoded = bytes(b ^ dynamic_key[i % len(dynamic_key)] for i, b in enumerate(value.encode("utf-8")))
     bytesNode = ast.Constant(value=encoded)
@@ -221,23 +214,6 @@ def _makeXorStringExpr(value: str, key: int) -> ast.Call:
     
     # Return: (lambda d, k: bytes(b ^ k[i % len(k)] for i, b in enumerate(d)).decode())(data, (key_tuple))
     return ast.Call(func=decodeLambda, args=[bytesNode, keyTuple], keywords=[])
-    names: set[str] = set()
-    for root, dirs, files in os.walk(sourceDir):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
-        for file in files:
-            if not file.endswith(".py"):
-                continue
-            absPath = os.path.join(root, file)
-            try:
-                with open(absPath, "r", encoding="utf-8") as f:
-                    source = f.read()
-                tree = ast.parse(source, filename=absPath)
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    names.add(node.name)
-    return frozenset(names)
 
 
 def collectLocalClassNames(sourceDir: str) -> frozenset[str]:
@@ -788,8 +764,6 @@ def _isDocstringNode(node: ast.AST) -> bool:
 
 
 class EncodeStringsAdvanced(ast.NodeTransformer):
-    """Advanced string encoding with dynamic multi-byte XOR keys and optional string splitting."""
-
     def __init__(self, skipLines: frozenset[int], protectedNames: frozenset[str], key: int, skipDocstrings: bool = False, useStringSplitting: bool = False) -> None:
         self.skipLines = skipLines
         self.protectedNames = protectedNames
