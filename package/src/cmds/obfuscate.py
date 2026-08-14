@@ -1122,7 +1122,6 @@ def applyLoaderStub(source: str, xorKey: int = 7) -> str:
     table_repr = "(" + ", ".join(repr(e) for e in tbl_entries) + ",)"
     key_repr = "(" + ", ".join(str(b) for b in tbl_key) + ",)"
 
-    # payload: b64(compressed source) xor round-key, split into chunks
     payload_key = [rng.randint(0, 255) for _ in range(rng.randint(8, 16))]
     xored_payload = bytes(b ^ payload_key[i % len(payload_key)] for i, b in enumerate(payload_b64.encode()))
     nchunks = rng.randint(3, 6)
@@ -1160,6 +1159,137 @@ def applyLoaderStub(source: str, xorKey: int = 7) -> str:
     return "\n".join(lines)
 
 
+def applyLoaderStubDynamic(source: str, xorKey: int = 7, hostKey: str | None = None) -> str:
+    import hashlib as _hashlib
+    import zlib as _zlib
+    import base64 as _base64
+
+    tree = ast.parse(source)
+    header, body = _extractMetadataHeader(tree)
+    payload_source = ast.unparse(ast.Module(body=body, type_ignores=[]))
+    payload_compressed = _zlib.compress(payload_source.encode("utf-8"), level=9)
+
+    if hostKey is not None:
+        key_digest = bytes.fromhex(hostKey)
+    else:
+        key_digest = _hashlib.sha256(xorKey.to_bytes(1, "big") + payload_compressed[:32]).digest()
+
+    def _rc4(data: bytes, key: bytes) -> bytes:
+        S = list(range(256))
+        j = 0
+        for i in range(256):
+            j = (j + S[i] + key[i % len(key)]) % 256
+            S[i], S[j] = S[j], S[i]
+        i = j = 0
+        out = bytearray()
+        for c in data:
+            i = (i + 1) % 256
+            j = (j + S[i]) % 256
+            S[i], S[j] = S[j], S[i]
+            out.append(c ^ S[(S[i] + S[j]) % 256])
+        return bytes(out)
+
+    encrypted = _rc4(payload_compressed, key_digest)
+    payload_b85 = _base64.b85encode(encrypted).decode("ascii")
+
+    rng = _random.Random((hash(source) ^ xorKey) & 0xFFFFFFFF)
+    used: set[str] = set()
+
+    nP   = _makeLoaderName(rng, used)
+    nI   = _makeLoaderName(rng, used)
+    nG   = _makeLoaderName(rng, used)
+    nC   = _makeLoaderName(rng, used)
+    nB   = _makeLoaderName(rng, used)
+    nE   = _makeLoaderName(rng, used)
+    nCP  = _makeLoaderName(rng, used)
+    nZ   = _makeLoaderName(rng, used)
+    nB85 = _makeLoaderName(rng, used)
+    nDC  = _makeLoaderName(rng, used)
+    nHL  = _makeLoaderName(rng, used)
+    nRC  = _makeLoaderName(rng, used)
+    nT   = _makeLoaderName(rng, used)
+    nEO  = _makeLoaderName(rng, used)
+    nCl  = _makeLoaderName(rng, used)
+    nA   = _makeLoaderName(rng, used)
+    nK   = _makeLoaderName(rng, used)
+    nRW  = _makeLoaderName(rng, used)
+    nDC2 = _makeLoaderName(rng, used)
+    nOB  = _makeLoaderName(rng, used)
+
+    def _chr(name: str) -> str:
+        return "+".join(f"chr({ord(c)})" for c in name)
+
+    class_path = "org.telegram.ui.Components.LayoutHelper"
+    cp_chars = [ord(c) ^ 4 for c in class_path]
+
+    lines: list[str] = []
+
+    for name, const in header:
+        lines.append(f"{name} = {repr(ast.literal_eval(const))}")
+    if header:
+        lines.append("")
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                if isinstance(base, ast.Name) and base.id == "BasePlugin":
+                    plugin_class_name = node.name
+                    break
+            if plugin_class_name:
+                break
+    if plugin_class_name:
+        lines.append("from base_plugin import BasePlugin")
+        lines.append(f"class {plugin_class_name}(BasePlugin): pass")
+        lines.append("")
+
+    lines.append(f"{nP} = '{payload_b85}'")
+    lines.append("")
+    lines.append(f"{nI} = __import__")
+    lines.append(f"{nG} = getattr")
+    lines.append(f"{nC} = globals()")
+    lines.append("")
+    lines.append(f"{nB} = {nI}({_chr('builtins')})")
+    lines.append(f"{nE} = {nG}({nB}, {_chr('exec')})")
+    lines.append(f"{nCP} = {nG}({nB}, {_chr('compile')})")
+    lines.append(f"{nZ} = {nI}({_chr('zlib')})")
+    lines.append(f"{nB85} = {nG}({nI}({_chr('base64')}), {_chr('b85decode')})")
+    lines.append(f"{nDC} = {nG}({nZ}, {_chr('decompress')})")
+    lines.append(f"{nHL} = {nI}({_chr('hashlib')})")
+    lines.append("")
+
+    plugin_id = ast.literal_eval(
+        next(v for n, v in header if n == "__id__")
+    ) if header else "default"
+    lines.append(f"if __id__ == {repr(plugin_id)}:")
+    lines.append(f"    {nRW} = {nB85}({nP})")
+    lines.append("")
+    lines.append(f"    def {nRC}(d, k):")
+    lines.append(f"        S, j, o = list(range(256)), 0, bytearray()")
+    lines.append(f"        for i in range(256): j = (j + S[i] + k[i % len(k)]) % 256; S[i], S[j] = S[j], S[i]")
+    lines.append(f"        i = j = 0")
+    lines.append(f"        for c in d: i = (i + 1) % 256; j = (j + S[i]) % 256; S[i], S[j] = S[j], S[i]; o.append(c ^ S[(S[i] + S[j]) % 256])")
+    lines.append(f"        return o")
+    lines.append("")
+    lines.append(f"    try:")
+    lines.append(f"        try: {nEO} = len({nI}({_chr('java')}).__name__)")
+    lines.append(f"        except Exception: {nEO} = 13")
+    lines.append("")
+    lines.append(f"        {nT} = ''.join([chr(x ^ {nEO}) for x in {cp_chars}])")
+    lines.append(f"        {nCl} = {nI}({_chr('hook_utils')}).find_class({nT})")
+    lines.append(f"        {nA} = sorted([str(x) for x in dir({nCl}) if not str(x).startswith('__')])")
+    lines.append(f"        {nK} = {nG}({nHL}, {_chr('sha256')})(''.join({nA}).encode({_chr('utf-8')})).digest()")
+    lines.append("")
+    lines.append(f"        {nDC2} = {nDC}({nRC}({nRW}, {nK})).decode({_chr('utf-8')})")
+    lines.append("")
+    lines.append(f"        {nOB} = {nCP}({nDC2}, '<sekz>', {_chr('exec')})")
+    lines.append("")
+    lines.append(f"        {nE}({nOB}, {nC})")
+    lines.append(f"    except Exception:")
+    lines.append(f"        pass")
+
+    return "\n".join(lines)
+
+
 def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey: int, localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None) -> str:
     if obfConfig is None:
         obfConfig = {}
@@ -1172,14 +1302,12 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     doJunkCode: bool = obfConfig.get("junkCode", False)
     doStringSplitting: bool = obfConfig.get("stringSplitting", False)
     doLoaderStub: bool = obfConfig.get("loaderStub", False)
+    doLoaderStubDynamic: bool = obfConfig.get("loaderStubDynamic", False)
+    loaderStubDynamicKey: str | None = obfConfig.get("loaderStubDynamicKey")
 
     commentLines = _scanCommentLines(source)
     tree = ast.parse(source)
 
-    # Metadata (__id__, __name__, __requirements__, ...) is AST-parsed from the
-    # entry module by the host (plugins.exteragram.app/docs/plugin-class). Pull the
-    # plain top-level literals out BEFORE any pass so encodeStrings/encodeNumbers
-    # cannot turn them into expressions, then re-attach them verbatim at the end.
     metadataHeader, metadataBody = _extractMetadataHeader(tree)
     tree = ast.Module(body=metadataBody, type_ignores=[])
     headerText = ""
@@ -1236,5 +1364,8 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     if doZlibCompression:
         result = applyZlibCompression(result)
     if doLoaderStub:
-        result = applyLoaderStub(result, xorKey)
+        if doLoaderStubDynamic:
+            result = applyLoaderStubDynamic(result, xorKey, hostKey=loaderStubDynamicKey)
+        else:
+            result = applyLoaderStub(result, xorKey)
     return result

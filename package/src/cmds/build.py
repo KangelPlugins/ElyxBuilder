@@ -129,14 +129,18 @@ OBF_CONFIG_KEYS: list[str] = [
     "junkCode",
     "stringSplitting",
     "loaderStub",
+    "loaderStubDynamic",
+    "loaderStubDynamicKey",
     "saveMapping",
 ]
 
-OBF_CONFIG_DEFAULTS: dict[str, bool] = {
+OBF_CONFIG_DEFAULTS: dict[str, bool | None] = {
     "zlibCompression": False,
     "junkCode": True,
     "stringSplitting": True,
     "loaderStub": False,
+    "loaderStubDynamic": False,
+    "loaderStubDynamicKey": None,
 }
 
 def loadObfuscationConfig(config: dict, configPath: str) -> dict:
@@ -145,8 +149,8 @@ def loadObfuscationConfig(config: dict, configPath: str) -> dict:
         raw = {}
     changed = False
     for key in OBF_CONFIG_KEYS:
-        if key not in raw:
-            raw[key] = OBF_CONFIG_DEFAULTS.get(key, True)
+        if key not in raw and key in OBF_CONFIG_DEFAULTS:
+            raw[key] = OBF_CONFIG_DEFAULTS[key]
             changed = True
     if changed:
         config["obfuscationConfig"] = raw

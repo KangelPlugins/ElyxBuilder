@@ -509,7 +509,88 @@ The final stage, ported from the obfuscation technique observed in the reversed 
 
 Disabled by default (`loaderStub: false`). Unlike `zlibCompression`, the output **can** be compiled to `.pyc` (it is a plain `.py` launcher), but no function mapping is generated — the payload is hidden inside the encrypted blob, so `builds/latest_mapping.json` for such files contains empty `functions`/`classes`.
 
-> **Note:** `zlibCompression` and `loaderStub` are mutually exclusive terminal stages. If both are enabled, `loaderStub` is applied last.
+> **Note:** `zlibCompression`, `loaderStub`, and `loaderStubDynamic` are mutually exclusive terminal stages. If multiple are enabled, `loaderStubDynamic` takes precedence over `loaderStub`, which takes precedence over `zlibCompression`.
+
+#### 9. Dynamic loader stub (`loaderStubDynamic`)
+
+Extended variant of `loaderStub`, ported from the technique used in the real obfuscated plugin `eblan_update.plugin`. Instead of a static XOR key, it generates a runtime key that the stub recomputes at execution time — making static extraction of the payload impossible.
+
+#### How it works
+
+**Build-time:**
+1. Metadata (`__id__`, `__name__`, etc.) is extracted from the source module and kept in plain text.
+2. After metadata, a plaintext stub class is inserted:
+   ```python
+   from base_plugin import BasePlugin
+   class Plugin(BasePlugin): pass
+   ```
+   The ElyxCore host scans the AST for a `BasePlugin` subclass **before** exec — the stub is required, otherwise the plugin won't load.
+3. The rest of the code is compressed (zlib, level 9), encrypted with RC4, and base85-encoded.
+4. A dynamic stub is appended to the source file: derives the key from `dir(LayoutHelper)`, decrypts the payload, and executes it.
+
+**Runtime (on device):**
+1. ElyxCore imports the module, sees the plaintext stub — passes the AST check.
+2. On exec, the stub runs:
+   - `hook_utils.find_class("org.telegram.ui.Components.LayoutHelper")` — finds the Java LayoutHelper class.
+   - `sha256(sorted(dir(cl))).digest()` — computes SHA256 of the sorted attribute list.
+   - The resulting 32-byte key is used for RC4 decryption.
+3. The decrypted code replaces the stub — `Plugin` inherits all methods and attributes from the original source.
+
+#### Why this is more secure
+
+| | `loaderStub` (static) | `loaderStubDynamic` |
+|---|---|---|
+| Key | Random, baked into archive | Computed from `dir(LayoutHelper)` on device |
+| Extraction | XOR/brute-force on PC | Impossible without running inside Telegram context |
+| Key changes? | No | Yes, on Telegram updates (new methods in LayoutHelper) |
+| Static analysis | Payload can be decrypted | Impossible — key is not in the file |
+
+#### Key capture plugin
+
+Before building, you must obtain the `dir(LayoutHelper)` hash from the target device. Example helper plugin:
+
+```python
+__id__ = "layouthelper_key"
+__name__ = "LayoutHelper Key Dumper"
+__author__ = "helper"
+__version__ = "1.0"
+
+from base_plugin import BasePlugin
+from hook_utils import find_class
+from hashlib import sha256
+from android_utils import log
+
+class LayoutHelperKeyPlugin(BasePlugin):
+    def on_plugin_load(self):
+        try:
+            cl = find_class("org.telegram.ui.Components.LayoutHelper")
+            if cl is None:
+                log("LayoutHelper class not found!")
+                return
+
+            attrs = sorted(str(x) for x in dir(cl) if not str(x).startswith("__"))
+            joined = "".join(attrs)
+            key = sha256(joined.encode("utf-8")).digest()
+
+            log("SHA256 (hex): " + key.hex())
+        except Exception as e:
+            log(f"Error: {e}")
+```
+
+Install this plugin, open Logcat — the SHA256 hex string will appear in the logs. Paste it into `loaderStubDynamicKey`.
+
+#### Config
+
+```yaml
+obfuscation:
+  loaderStub: false          # disable static loaderStub
+  loaderStubDynamic: true    # enable dynamic
+  loaderStubDynamicKey: "70d3305abb8644c27683463b52d6338168728bc90ac0ebd9313be6754bc9cc84"
+```
+
+`loaderStubDynamicKey` — 64-character hex string (SHA256). If not set, falls back to the `xorKey`-derived key.
+
+> **Note:** `loaderStub` and `loaderStubDynamic` are mutually exclusive. If both are enabled, `loaderStubDynamic` takes precedence.
 
 ### Source markers
 
@@ -549,11 +630,15 @@ obfuscation:
   stringSplitting: true
   zlibCompression: false
   loaderStub: false
+  loaderStubDynamic: false
+  loaderStubDynamicKey: ""
 ```
 
-All keys are optional. The default for each is `true`, except `zlibCompression` and `loaderStub` which default to `false`. Set a key to `false` to disable the corresponding pipeline stage.
+All keys are optional. The default for each is `true`, except `zlibCompression`, `loaderStub`, and `loaderStubDynamic` which default to `false`. Set a key to `false` to disable the corresponding pipeline stage.
 
 `junkCode` injects decoy functions at the top of the module. `stringSplitting` prepares long strings to be split into fragments before encoding.
+
+`loaderStubDynamic` is an extended variant of `loaderStub` that uses a runtime-derived key. Requires `loaderStubDynamicKey` (hex SHA256). See [Dynamic loader stub](#9-dynamic-loader-stub-loaderstubdynamic) for details.
 
 The `removeLogs` setting also applies to plain (non-obfuscated) builds — log calls are stripped from `.py` files that are included in the archive as source.
 
