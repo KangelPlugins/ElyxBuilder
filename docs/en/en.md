@@ -494,6 +494,23 @@ The payload is executed with `globals()` and `locals()` passed explicitly so the
 
 This stage runs after all AST passes and operates on the already-obfuscated source text. It is disabled by default (`zlibCompression: false`) because it produces output that cannot be compiled to `.pyc` — do not combine with `--compile`.
 
+#### 8. Loader stub (`loaderStub`)
+
+The final stage, ported from the obfuscation technique observed in the reversed Elyx plugin `text_animation (3).plugin`:
+
+- Metadata (`__id__`, `__name__`, `__author__`, `__version__`, `__description__`, `__icon__`), if present at the top of the module, is kept in plain text — the plugin must be able to read it on startup.
+- The rest of the module is compressed (`zlib`, level 9), base64-encoded, XOR-encrypted with a random multi-byte key, then split into chunks.
+- Imports are aliased to long mangled names (`import base64 as _audq6m0uixf6rnbvzf6vtls`).
+- The standard base64 alphabet is disguised — split into random fragments and reassembled at runtime.
+- Helper strings (`decompress`, `b64decode`) are hidden in a table: `b64(string) XOR key`; access via the `dec(i)` helper.
+- Attribute access goes through `getattr(mod, dec(i))`, hiding names from static analysis.
+- Junk code with self-canceling XOR pairs (`c ^ 0x55 ^ 0x55`) is injected — the same trick as the dead opcodes in the original plugin's VM.
+- The payload is executed via `exec(decrypt(...), globals(), globals())` — restored and executed at runtime.
+
+Disabled by default (`loaderStub: false`). Unlike `zlibCompression`, the output **can** be compiled to `.pyc` (it is a plain `.py` launcher), but no function mapping is generated — the payload is hidden inside the encrypted blob, so `builds/latest_mapping.json` for such files contains empty `functions`/`classes`.
+
+> **Note:** `zlibCompression` and `loaderStub` are mutually exclusive terminal stages. If both are enabled, `loaderStub` is applied last.
+
 ### Source markers
 
 Markers are inline comments that control obfuscation behavior per line or per node.
@@ -531,9 +548,10 @@ obfuscation:
   junkCode: true
   stringSplitting: true
   zlibCompression: false
+  loaderStub: false
 ```
 
-All keys are optional. The default for each is `true`, except `zlibCompression` which defaults to `false`. Set a key to `false` to disable the corresponding pipeline stage.
+All keys are optional. The default for each is `true`, except `zlibCompression` and `loaderStub` which default to `false`. Set a key to `false` to disable the corresponding pipeline stage.
 
 `junkCode` injects decoy functions at the top of the module. `stringSplitting` prepares long strings to be split into fragments before encoding.
 

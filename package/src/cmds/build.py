@@ -128,6 +128,7 @@ OBF_CONFIG_KEYS: list[str] = [
     "zlibCompression",
     "junkCode",
     "stringSplitting",
+    "loaderStub",
     "saveMapping",
 ]
 
@@ -135,6 +136,7 @@ OBF_CONFIG_DEFAULTS: dict[str, bool] = {
     "zlibCompression": False,
     "junkCode": True,
     "stringSplitting": True,
+    "loaderStub": False,
 }
 
 def loadObfuscationConfig(config: dict, configPath: str) -> dict:

@@ -1018,6 +1018,9 @@ def collectFileMapping(originalSource: str, obfuscatedSource: str) -> dict:
 
 def applyObfuscationPipelineWithMapping(source: str, protectedNames: frozenset[str], xorKey: int, localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None) -> tuple[str, dict]:
     obfuscated = applyObfuscationPipeline(source, protectedNames, xorKey, localClassNames, obfConfig)
+    if obfConfig is not None and obfConfig.get("loaderStub", False):
+        # the payload lives inside the loader blob — top-level symbols aren't mappable
+        return obfuscated, {"functions": [], "classes": []}
     mapping = collectFileMapping(source, obfuscated)
     return obfuscated, mapping
 
@@ -1032,6 +1035,131 @@ def applyZlibCompression(source: str) -> str:
     return line1 + "\n" + line2
 
 
+_LOADER_NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+def _makeLoaderName(rng: _random.Random, used: set[str]) -> str:
+    # long mangled identifiers like the ones in the reversed loader stub
+    while True:
+        length = rng.randint(22, 34)
+        name = "_" + rng.choice(_string.ascii_lowercase) + "".join(rng.choice(_LOADER_NAME_CHARS) for _ in range(length))
+        if name not in used:
+            used.add(name)
+            return name
+
+
+def _splitAlphabetChunks(alpha: str, rng: _random.Random) -> tuple[str, ...]:
+    cuts = sorted(rng.sample(range(1, len(alpha)), rng.randint(2, 4)))
+    parts: list[str] = []
+    start = 0
+    for c in cuts:
+        parts.append(alpha[start:c])
+        start = c
+    parts.append(alpha[start:])
+    return tuple(parts)
+
+
+_LOADER_STD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+
+def _extractMetadataHeader(tree: ast.Module) -> tuple[list[tuple[str, ast.AST]], list[ast.AST]]:
+    # metadata (__id__, __name__, __requirements__, ...) is AST-parsed from the
+    # entry module by the host (see plugins.exteragram.app/docs/plugin-class), so it
+    # must stay as plain top-level literals and be pulled out of the payload.
+    header: list[tuple[str, ast.AST]] = []
+    body: list[ast.AST] = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id.startswith("__")
+            and node.targets[0].id.endswith("__")
+        ):
+            try:
+                ast.literal_eval(node.value)
+            except (ValueError, TypeError):
+                body.append(node)
+                continue
+            header.append((node.targets[0].id, node.value))
+            continue
+        body.append(node)
+    return header, body
+
+
+def applyLoaderStub(source: str, xorKey: int = 7) -> str:
+    # ports the loader-stub obfuscation observed in the reversed plugin:
+    # preserved metadata header, mangled import aliases, disguised b64 alphabet,
+    # string table + dec(i) helper, getattr hiding, XORed payload + exec.
+    import zlib as _zlib
+    import base64 as _base64
+
+    tree = ast.parse(source)
+    header, body = _extractMetadataHeader(tree)
+    payload_source = ast.unparse(ast.Module(body=body, type_ignores=[]))
+    compressed = _zlib.compress(payload_source.encode("utf-8"), level=9)
+    payload_b64 = _base64.b64encode(compressed).decode("ascii")
+
+    rng = _random.Random((hash(source) ^ xorKey) & 0xFFFFFFFF)
+    used: set[str] = set()
+    n1 = _makeLoaderName(rng, used)  # base64
+    n2 = _makeLoaderName(rng, used)  # zlib
+    nA = _makeLoaderName(rng, used)  # disguised alphabet chunks
+    nT = _makeLoaderName(rng, used)  # string table
+    nK = _makeLoaderName(rng, used)  # string-table xor key
+    nD = _makeLoaderName(rng, used)  # dec(i)
+    nG = _makeLoaderName(rng, used)  # getattr helper
+    nP = _makeLoaderName(rng, used)  # payload chunks
+    nQ = _makeLoaderName(rng, used)  # payload xor key
+    nR = _makeLoaderName(rng, used)  # decrypt+exec helper
+    nJ = _makeLoaderName(rng, used)  # dead-xor junk
+
+    # string table: b64(s) xor round-key
+    tbl_key = bytes(rng.randint(0, 255) for _ in range(rng.randint(6, 10)))
+    tbl_entries = []
+    for s in ("decompress", "b64decode"):
+        enc = _base64.b64encode(s.encode()).decode("ascii")
+        xored = bytes(b ^ tbl_key[i % len(tbl_key)] for i, b in enumerate(enc.encode()))
+        tbl_entries.append(xored)
+    table_repr = "(" + ", ".join(repr(e) for e in tbl_entries) + ",)"
+    key_repr = "(" + ", ".join(str(b) for b in tbl_key) + ",)"
+
+    # payload: b64(compressed source) xor round-key, split into chunks
+    payload_key = [rng.randint(0, 255) for _ in range(rng.randint(8, 16))]
+    xored_payload = bytes(b ^ payload_key[i % len(payload_key)] for i, b in enumerate(payload_b64.encode()))
+    nchunks = rng.randint(3, 6)
+    chunk_len = max(1, len(xored_payload) // nchunks)
+    chunks = [xored_payload[i * chunk_len:(i + 1) * chunk_len] for i in range(nchunks)]
+    chunks[-1] = xored_payload[(nchunks - 1) * chunk_len:]
+    chunks = [c for c in chunks if c]
+    payload_chunks_repr = "(" + ", ".join(repr(c) for c in chunks) + ",)"
+    payload_key_repr = "(" + ", ".join(str(b) for b in payload_key) + ",)"
+
+    alpha_repr = repr(_splitAlphabetChunks(_LOADER_STD_ALPHABET, rng))
+
+    lines: list[str] = []
+    for name, const in header:
+        lines.append(f"{name} = {repr(ast.literal_eval(const))}")
+    if header:
+        lines.append("")
+
+    lines.append(f"import base64 as {n1}")
+    lines.append(f"import zlib as {n2}")
+    lines.append("")
+    lines.append(f"{nA} = {alpha_repr}")
+    lines.append(f"{nT} = {table_repr}")
+    lines.append(f"{nK} = {key_repr}")
+    lines.append(f"{nJ} = lambda b: bytes(c ^ 0x55 ^ 0x55 for c in b)")
+    lines.append(f"{nD} = lambda i, t={nT}, k={nK}, b64={n1}.b64decode: b64(bytes(c ^ k[i % len(k)] for i, c in enumerate(t[i]))).decode()")
+    lines.append(f"{nG} = lambda m, i: getattr(m, {nD}(i))")
+    lines.append(f"{nP} = {payload_chunks_repr}")
+    lines.append(f"{nQ} = {payload_key_repr}")
+    lines.append(
+        f"{nR} = lambda p, q, b64={n1}.b64decode, dec={nD}, z={n2}, j={nJ}: "
+        f"getattr(z, dec(0))(b64(bytes(c ^ q[i % len(q)] for i, c in enumerate(b''.join(p)))))"
+    )
+    lines.append(f"exec(({nR})({nP}, {nQ}), globals(), globals())")
+    return "\n".join(lines)
+
+
 def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey: int, localClassNames: frozenset[str] = frozenset(), obfConfig: dict | None = None) -> str:
     if obfConfig is None:
         obfConfig = {}
@@ -1043,9 +1171,20 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
     doZlibCompression: bool = obfConfig.get("zlibCompression", False)
     doJunkCode: bool = obfConfig.get("junkCode", False)
     doStringSplitting: bool = obfConfig.get("stringSplitting", False)
+    doLoaderStub: bool = obfConfig.get("loaderStub", False)
 
     commentLines = _scanCommentLines(source)
     tree = ast.parse(source)
+
+    # Metadata (__id__, __name__, __requirements__, ...) is AST-parsed from the
+    # entry module by the host (plugins.exteragram.app/docs/plugin-class). Pull the
+    # plain top-level literals out BEFORE any pass so encodeStrings/encodeNumbers
+    # cannot turn them into expressions, then re-attach them verbatim at the end.
+    metadataHeader, metadataBody = _extractMetadataHeader(tree)
+    tree = ast.Module(body=metadataBody, type_ignores=[])
+    headerText = ""
+    if metadataHeader:
+        headerText = "\n".join(f"{name} = {repr(ast.literal_eval(const))}" for name, const in metadataHeader) + "\n\n"
 
     fstringNames: set[str] = set()
     for node in ast.walk(tree):
@@ -1091,8 +1230,11 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
         tree = EncodeNumbers(commentLines["# ELYBnoIntObf"]).visit(tree)
     ast.fix_missing_locations(tree)
     result = ast.unparse(tree)
+    result = headerText + result
     for key, original in fstringMap.items():
         result = result.replace(f"'{key}'", original)
     if doZlibCompression:
         result = applyZlibCompression(result)
+    if doLoaderStub:
+        result = applyLoaderStub(result, xorKey)
     return result
