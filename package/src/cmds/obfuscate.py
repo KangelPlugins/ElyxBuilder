@@ -1229,6 +1229,7 @@ def applyLoaderStubDynamic(source: str, xorKey: int = 7, hostKey: str | None = N
     if header:
         lines.append("")
 
+    plugin_class_name = None
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.ClassDef):
             for base in node.bases:
@@ -1363,9 +1364,8 @@ def applyObfuscationPipeline(source: str, protectedNames: frozenset[str], xorKey
         result = result.replace(f"'{key}'", original)
     if doZlibCompression:
         result = applyZlibCompression(result)
-    if doLoaderStub:
-        if doLoaderStubDynamic:
-            result = applyLoaderStubDynamic(result, xorKey, hostKey=loaderStubDynamicKey)
-        else:
-            result = applyLoaderStub(result, xorKey)
+    if doLoaderStubDynamic:
+        result = applyLoaderStubDynamic(result, xorKey, hostKey=loaderStubDynamicKey)
+    elif doLoaderStub:
+        result = applyLoaderStub(result, xorKey)
     return result
